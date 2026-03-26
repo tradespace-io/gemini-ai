@@ -17,6 +17,8 @@ module Gemini
 
       DEFAULT_SERVICE_VERSION = 'v1'
 
+      attr_reader :base_address
+
       def initialize(config)
         @service = config[:credentials][:service]
 
@@ -54,16 +56,12 @@ module Gemini
 
         @service_version = config.dig(:credentials, :version) || DEFAULT_SERVICE_VERSION
 
-        @base_address = case @service
-                        when 'vertex-ai-api'
-                          if config[:credentials][:region] == 'global'
-                            "https://aiplatform.googleapis.com/#{@service_version}/projects/#{@project_id}/locations/#{config[:credentials][:region]}"
-                          else
-                            "https://#{config[:credentials][:region]}-aiplatform.googleapis.com/#{@service_version}/projects/#{@project_id}/locations/#{config[:credentials][:region]}"
-                          end
-                        when 'generative-language-api'
-                          "https://generativelanguage.googleapis.com/#{@service_version}"
-                        end
+        @base_address = config[:credentials][:base_address] || case @service
+                                                               when 'vertex-ai-api'
+                                                                 "https://#{config[:credentials][:region]}-aiplatform.googleapis.com/#{@service_version}/projects/#{@project_id}/locations/#{config[:credentials][:region]}"
+                                                               when 'generative-language-api'
+                                                                 "https://generativelanguage.googleapis.com/#{@service_version}"
+                                                               end
 
         @model_address = case @service
                          when 'vertex-ai-api'
@@ -83,6 +81,8 @@ module Gemini
                            else
                              {}
                            end
+
+        @custom_headers = config.dig(:options, :headers) || {}
       end
 
       def avoid_conflicting_credentials!(credentials)
@@ -181,7 +181,7 @@ module Gemini
         method_to_call = request_method.to_s.strip.downcase.to_sym
 
         response = Faraday.new(request: @request_options) do |faraday|
-          faraday.adapter @faraday_adapter
+          faraday.adapter(@faraday_adapter)
           faraday.response :raise_error
         end.send(method_to_call) do |request|
           request.url url
@@ -189,6 +189,8 @@ module Gemini
           if @authentication == :service_account || @authentication == :default_credentials
             request.headers['Authorization'] = "Bearer #{@authorizer.fetch_access_token!['access_token']}"
           end
+
+          @custom_headers.each { |key, value| request.headers[key] = value }
 
           request.body = payload.to_json unless payload.nil?
 
